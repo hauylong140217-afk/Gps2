@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=0">
+    <title>Online Speedometer - Đo Tốc Độ GPS Realtime</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #12131A;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 100vh;
+            padding: 40px 20px;
+            overflow: hidden;
+        }
+
+        /* Phần hiển thị tên & Tọa độ */
+        .header-panel {
+            text-align: center;
+        }
+        .title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #29aafe;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+        }
+        .gps-data-box {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+        .gps-tag {
+            background-color: #1a1b24;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .gps-tag span {
+            color: #888;
+        }
+
+        /* Đồng hồ tốc độ trung tâm */
+        .meter-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* Tạo vòng tròn vạch chia giả lập bằng CSS conic-gradient */
+        .meter-dial {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 2px dashed rgba(255, 255, 255, 0.1);
+            mask: padding-box, url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><circle cx="140" cy="140" r="130" stroke="black" stroke-dasharray="5,5" fill="none"/></svg>');
+        }
+        .speed-center {
+            text-align: center;
+            z-index: 2;
+        }
+        #speed-text {
+            font-size: 80px;
+            font-weight: 900;
+            line-height: 1;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .unit-text {
+            font-size: 16px;
+            color: #888;
+            margin-top: 5px;
+            font-weight: 500;
+        }
+
+        /* Nút bấm xin quyền & trạng thái */
+        .control-panel {
+            width: 100%;
+            max-width: 360px;
+            text-align: center;
+        }
+        .status-message {
+            font-size: 13px;
+            color: #aaa;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+        .btn-gps {
+            background-color: #29aafe;
+            color: #fff;
+            border: none;
+            padding: 14px 28px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(41, 170, 254, 0.4);
+            transition: all 0.2s ease;
+        }
+        .btn-gps:hover {
+            background-color: #1492e6;
+            transform: translateY(-1px);
+        }
+        .btn-gps:active {
+            transform: translateY(1px);
+        }
+        
+        /* Hiệu ứng khi đang quét GPS thành công */
+        .active-gps {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(41, 170, 254, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(41, 170, 254, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(41, 170, 254, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. KHU VỰC HIỂN THỊ THÔNG TIN GPS -->
+    <div class="header-panel">
+        <div class="title">GPS Speedometer Online</div>
+        <div class="gps-data-box">
+            <div class="gps-tag"><span>LAT:</span> <id id="lat-val">0.000000</id></div>
+            <div class="gps-tag"><span>LNG:</span> <id id="lng-val">0.000000</id></div>
+        </div>
+    </div>
+
+    <!-- 2. KHU VỰC ĐỒNG HỒ SỐ CHÍNH -->
+    <div class="meter-container">
+        <div class="meter-dial"></div>
+        <div class="speed-center">
+            <div id="speed-text">0</div>
+            <div class="unit-text">Km/h</div>
+        </div>
+    </div>
+
+    <!-- 3. KHU VỰC ĐIỀU KHIỂN & XIN QUYỀN VỊ TRÍ -->
+    <div class="control-panel">
+        <div class="status-message" id="status-msg">
+            Hệ thống cần quyền truy cập Vị trí (GPS) để tính toán tốc độ di chuyển theo thời gian thực.
+        </div>
+        <button class="btn-gps" id="start-btn" onclick="requestGpsPermission()">
+            KÍCH HOẠT ĐO GPS
+        </button>
+        <div id="accuracy-val" style="font-size: 11px; color: #555; margin-top: 10px; font-family: monospace;"></div>
+    </div>
+
+    <script>
+        let watchId = null;
+
+        function requestGpsPermission() {
+            const statusMsg = document.getElementById('status-msg');
+            const startBtn = document.getElementById('start-btn');
+
+            // Kiểm tra trình duyệt có hỗ trợ GPS không
+            if (!navigator.geolocation) {
+                statusMsg.innerHTML = "<span style='color: #ff4a4a;'>Trình duyệt của bạn không hỗ trợ định vị GPS định sẵn.</span>";
+                return;
+            }
+
+            statusMsg.innerText = "Đang gửi yêu cầu cấp quyền từ hệ thống...";
+
+            // Cấu hình GPS chuyên dụng cho việc đo tốc độ di chuyển
+            const gpsOptions = {
+                enableHighAccuracy: true, // Bắt buộc bật định vị chính xác cao (Dùng chip GPS thay vì Wifi/Mạng di động)
+                timeout: 10000,           // Thời gian tối đa chờ phản hồi vệ tinh (10 giây)
+                maximumAge: 0             // Không sử dụng dữ liệu vị trí cũ lưu trong bộ nhớ đệm
+            };
+
+            // Tiến hành theo dõi vị trí liên tục (Trình duyệt sẽ hiện bảng thông báo cho phép/chặn tại đây)
+            watchId = navigator.geolocation.watchPosition(updateSpeedometer, handleGpsError, gpsOptions);
+            
+            // Đổi trạng thái nút bấm
+            startBtn.innerText = "ĐANG ĐO TỐC ĐỘ...";
+            startBtn.classList.add('active-gps');
+            startBtn.disabled = true;
+        }
+
+        // HÀM XỬ LÝ DỮ LIỆU KHI THIẾT BỊ DI CHUYỂN
+        function updateSpeedometer(position) {
+            const coords = position.coords;
+            
+            // 1. Cập nhật Kinh độ và Vĩ độ lên màn hình
+            document.getElementById('lat-val').innerText = coords.latitude.toFixed(6);
+            document.getElementById('lng-val').innerText = coords.longitude.toFixed(6);
+            
+            // Hiển thị độ sai số bán kính (để biết sóng GPS có khỏe hay không)
+            document.getElementById('accuracy-val').innerText = `Độ sai số GPS: ±${coords.accuracy.toFixed(1)} mét`;
+
+            // 2. Lấy tốc độ trả về từ phần cứng GPS máy (m/s)
+            let speedInMeterPerSecond = coords.speed;
+
+            // Kiểm tra xem dữ liệu tốc độ trả về có hợp lệ không (Nếu đứng im hoặc sóng yếu, giá trị có thể bị null hoặc âm)
+            if (speedInMeterPerSecond === null || speedInMeterPerSecond < 0 || isNaN(speedInMeterPerSecond)) {
+                document.getElementById('speed-text').innerText = "0";
+                document.getElementById('status-msg').innerText = "Đã kết nối vệ tinh. Hãy di chuyển để bắt đầu đo.";
+            } else {
+                // Đổi đơn vị từ m/s sang Km/h (Nhân với hệ số 3.6)
+                let speedInKmH = speedInMeterPerSecond * 3.6;
+                
+                // Làm tròn số nguyên hiển thị giống xe máy/ô tô
+                document.getElementById('speed-text').innerText = Math.round(speedInKmH);
+                document.getElementById('status-msg').innerText = "Tín hiệu GPS tốt! Hệ thống đang cập nhật.";
+            }
+        }
+
+        // HÀM XỬ LÝ LỖI (Khi người dùng bấm Từ chối hoặc mất sóng)
+        function handleGpsError(error) {
+            const statusMsg = document.getElementById('status-msg');
+            const startBtn = document.getElementById('start-btn');
+            
+            // Reset lại trạng thái nút bấm để người dùng có thể bấm lại
+            startBtn.innerText = "THỬ LẠI KẾT NỐI";
+            startBtn.classList.remove('active-gps');
+            startBtn.disabled = false;
+
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    statusMsg.innerHTML = "<span style='color: #ff4a4a;'>Bạn đã TỪ CHỐI cấp quyền vị trí. Hãy vào cài đặt trình duyệt để mở lại quyền cho trang web này.</span>";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    statusMsg.innerHTML = "<span style='color: #ffbc4a;'>Không thể xác định vị trí. Vui lòng bật định vị hệ thống (Location/GPS) trên điện thoại của bạn.</span>";
+                    break;
+                case error.TIMEOUT:
+                    statusMsg.innerHTML = "<span style='color: #ffbc4a;'>Hết thời gian tìm kiếm vệ tinh. Hãy di chuyển ra vùng không gian thoáng đãng hơn.</span>";
+                    break;
+                default:
+                    statusMsg.innerHTML = "<span style='color: #ff4a4a;'>Đã xảy ra lỗi hệ thống không xác định.</span>";
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>
